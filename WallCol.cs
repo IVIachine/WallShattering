@@ -2,9 +2,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-[System.Serializable]
-public class IntIntDictionary : SerializableDictionary<int, int> { }
-
 public class WallCol : MonoBehaviour
 {
     [HideInInspector]
@@ -12,11 +9,7 @@ public class WallCol : MonoBehaviour
     private string mAxis;
 
     [SerializeField]
-    private IntIntDictionary IntegerIntegerStore = IntIntDictionary.New<IntIntDictionary>();
-    private Dictionary<int, int> mPathLookup
-    {
-        get { return IntegerIntegerStore.dictionary; }
-    }
+    private Dictionary<int, int> mPathLookup;
 
     /// <summary>
     /// Invalidate shape at index to in a way destroy that triangle collider
