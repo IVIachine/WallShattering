@@ -1,5 +1,7 @@
 # Licence
 
+This work is licenced under Creative Commons Attribution 4.0 Licence. You can find it either online at https://creativecommons.org/licenses/by/4.0/ or in plain-text in the Licence.txt within this document.
+
 Attribution 4.0 International
 
 =======================================================================
