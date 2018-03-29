@@ -38,7 +38,7 @@ public class wallManager : MonoBehaviour
         int totalTriangles = 0;
         foreach (wallShatter shatter in shatters)
         {
-            shatter.initWall(index);
+            shatter.InitWall(index);
             totalTriangles += shatter.gameObject.GetComponent<MeshFilter>().mesh.triangles.Length;
             index++;
         }
@@ -172,7 +172,7 @@ public class wallManager : MonoBehaviour
                 Vector3 maxLoc = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
                 for (int i = 0; i < indices2.Length; i++)
                 {
-                    mWalls[objects2[i]].removeColliderAtIndex(indices2[i]);
+                    mWalls[objects2[i]].RemoveColliderAtIndex(indices2[i]);
                     verts = mWalls[objects2[i]].GetComponent<MeshFilter>().mesh.vertices;
 
                     //Move vertices far away so projections aren't rendered on them
@@ -239,11 +239,11 @@ public class wallManager : MonoBehaviour
                 //permenately remove triangles
                 for (int i = 0; i < list.Value.Count; i++)
                 {
-                    mWalls[list.Key].removeTriangleAtIndex(list.Value[i], ref temp);
+                    mWalls[list.Key].RemoveTriangleAtIndex(list.Value[i], ref temp);
                 }
 
                 mWalls[list.Key].GetComponent<MeshFilter>().mesh.triangles = temp.ToArray();
-                mWalls[list.Key].setIndexData();
+                mWalls[list.Key].SetIndexData();
             }
 
             mTriangleRemovalsIndices.SetData(new int[0]);
@@ -255,7 +255,7 @@ public class wallManager : MonoBehaviour
         //call post render function on each wall
         foreach (wallShatter shatter in uniqueShatters)
         {
-            shatter.customPostRender();
+            shatter.CustomPostRender();
         }
 
         mExpectColRemovals = false;

@@ -19,7 +19,7 @@ public class FragmentationEditorScript : Editor
         wallShatter wall = (wallShatter)target;
         if (GUILayout.Button("Generate Collider"))
         {
-            wall.initializeData();
+            wall.InitializeData();
         }
     }
 }

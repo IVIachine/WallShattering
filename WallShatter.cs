@@ -80,7 +80,7 @@ public class wallShatter : MonoBehaviour
     public void initializeData()
     {
 #if UNITY_EDITOR
-        Mesh newMesh = Mesh.Instantiate(avoidVertexSharing());
+        Mesh newMesh = Mesh.Instantiate(AvoidVertexSharing());
         AssetDatabase.CreateAsset(newMesh, "Assets/Scenes/scene1/models/walls/" + newMesh.name + gameObject.name + ".asset");
         AssetDatabase.SaveAssets();
         GetComponent<MeshFilter>().mesh = newMesh;
@@ -89,7 +89,7 @@ public class wallShatter : MonoBehaviour
 #endif
     }
 
-    public void initWall(int index)
+    public void InitWall(int index)
     {
         explosionTimes = new float[mExplosionMax];
         explosionRadii = new float[mExplosionMax];
@@ -195,19 +195,19 @@ public class wallShatter : MonoBehaviour
         }
     }
 
-    public void removeTriangleAtIndex(int index, ref List<int> workingTriangles)
+    public void RemoveTriangleAtIndex(int index, ref List<int> workingTriangles)
     {
         workingTriangles.RemoveAt(index * 3 + 2);
         workingTriangles.RemoveAt(index * 3 + 1);
         workingTriangles.RemoveAt(index * 3);
     }
 
-    public void setIndexData()
+    public void SetIndexData()
     {
         mIndices.SetData(GetComponent<MeshFilter>().mesh.triangles);
     }
 
-    public void removeColliderAtIndex(int index)
+    public void RemoveColliderAtIndex(int index)
     {
         GetComponent<WallCol>().updateColliderAtIndex(index);
     }
@@ -216,7 +216,7 @@ public class wallShatter : MonoBehaviour
     /// Check to see if any explosions are outdated
     /// Sort explosion buffers after removed
     /// </summary>
-    private void checkForRemovals()
+    private void CheckForRemovals()
     {
         if (mCurrentExplosions <= 0)
             return;
@@ -274,7 +274,7 @@ public class wallShatter : MonoBehaviour
     /// <param name="strength">Explosion strength</param>
     /// <param name="dir">Explosion direction</param>
     /// <param name="particles">Should use particles</param>
-    public void addNewExplosion(Vector3 pos, float strength, Vector2 dir, bool particles)
+    public void AddNewExplosion(Vector3 pos, float strength, Vector2 dir, bool particles)
     {
         if (mCurrentExplosions >= mExplosionMax)
             return;
@@ -323,7 +323,7 @@ public class wallShatter : MonoBehaviour
     /// Create mesh preventing triangles from sharing vertices
     /// </summary>
     /// <returns></returns>
-    private Mesh avoidVertexSharing()
+    private Mesh AvoidVertexSharing()
     {
         Mesh mesh = GetComponent<MeshFilter>().sharedMesh;
 
@@ -374,9 +374,9 @@ public class wallShatter : MonoBehaviour
     /// <summary>
     /// Called by wall manager after camera renders scene
     /// </summary>
-    public void customPostRender()
+    public void CustomPostRender()
     {
-        checkForRemovals();
+        CheckForRemovals();
 
         if (mTempIndices.Count > 0)
         {
