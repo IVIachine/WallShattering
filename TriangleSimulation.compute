@@ -1,0 +1,360 @@
+﻿//multiple kernals to suit differing triangle counts
+#pragma kernel SimulationHigh
+#pragma kernel SimulationMedium
+#pragma kernel SimulationLow
+#pragma kernel SimulationLowest
+
+//Starter constants
+float baseSpeed;
+float speedFromDistance;
+float speedRand;
+float removalTime;
+
+float baseRotationSpeed;
+float rotationSpeedFromDist;
+float rotSpeedRand;
+
+StructuredBuffer<float3> oldVertexPositions;
+
+//changing Vars
+uint numExplosions, objectIndex;
+
+//compute buffers
+StructuredBuffer<int> triangleIndices;
+StructuredBuffer<float> explosionTimes;
+StructuredBuffer<float> explosionRadii;
+StructuredBuffer<float3> explosionLocations;
+
+RWStructuredBuffer<float3> vertexPositions;
+
+AppendStructuredBuffer<int> colliderRemovalsIndices;
+AppendStructuredBuffer<int> triangleRemovalsIndices;
+AppendStructuredBuffer<int> colliderRemovalsObjects;
+AppendStructuredBuffer<int> triangleRemovalsObjects;
+
+//rotate point around axis
+static float3 rotatePosition(float3 n, float angle, float3 p)
+{
+	float3x3 m = float3x3(
+		n.x*n.x * (1.0f - cos(angle)) + cos(angle),      
+		n.x*n.y * (1.0f - cos(angle)) + n.z * sin(angle),
+		n.x*n.z * (1.0f - cos(angle)) - n.y * sin(angle),
+
+		n.y*n.x * (1.0f - cos(angle)) - n.z * sin(angle),
+		n.y*n.y * (1.0f - cos(angle)) + cos(angle),      
+		n.y*n.z * (1.0f - cos(angle)) + n.x * sin(angle),
+
+		n.z*n.x * (1.0f - cos(angle)) + n.y * sin(angle),
+		n.z*n.y * (1.0f - cos(angle)) - n.x * sin(angle),
+		n.z*n.z * (1.0f - cos(angle)) + cos(angle)       
+		);
+
+	float3 q = mul(m, p);
+	return q;
+}
+
+//CITE:http://www.reedbeta.com/blog/quick-and-easy-gpu-random-numbers-in-d3d11/
+uint rand_xorshift(uint seed)
+{
+	// Xorshift algorithm from George Marsaglia's paper
+	seed ^= (seed << 13);
+	seed ^= (seed >> 17);
+	seed ^= (seed << 5);
+	return seed;
+}
+
+[numthreads(16,1,1)]
+void SimulationHigh(uint3 id : SV_DispatchThreadID, uint3 groupIdx : SV_GroupID)
+{
+	if (numExplosions <= 0)
+		return;
+
+	float3 V1 = oldVertexPositions[triangleIndices[id.x * 3]];
+	float3 V2 = oldVertexPositions[triangleIndices[id.x * 3 + 1]];
+	float3 V3 = oldVertexPositions[triangleIndices[id.x * 3 + 2]];
+
+	float maxTime = -1;
+	float bestIndex = 1.#INF;
+
+	for (uint i = 0; i < numExplosions; i++)
+	{
+		float3 centerTemp = (V1 + V2 + V3) / 3;
+		float distTemp = distance(centerTemp, explosionLocations[i]);
+
+		if (distTemp < explosionRadii[i])
+		{
+			if (explosionTimes[i] > maxTime)
+			{
+				maxTime = explosionTimes[i];
+				bestIndex = i;
+			}
+		}
+	}
+
+	//triangle unaffected by explosions
+	if (isinf(bestIndex))
+		return;
+
+	//add to collider removals
+	if (explosionTimes[bestIndex] == 0)
+	{
+		colliderRemovalsIndices.Append(triangleIndices[id.x * 3]);
+		colliderRemovalsObjects.Append(objectIndex);
+	}
+
+	//add to triangle removals
+	if (explosionTimes[bestIndex] > removalTime)
+	{
+		triangleRemovalsIndices.Append(id.x);
+		triangleRemovalsObjects.Append(objectIndex);
+	}
+
+	float3 center = (V1 + V2 + V3) / 3;
+	float3 dist = distance(center, explosionLocations[bestIndex]);
+
+	float3 dir = normalize((explosionLocations[bestIndex] - center).xyz);
+	float3 perpendicular = float3(dir.y, -dir.x, dir.z);
+
+	float distRotIncrement = rotationSpeedFromDist * (1 / dist);
+
+	//rotate vertices
+	V1 = V1 - center;
+	V1 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V1) + center;
+
+	V2 = V2 - center;
+	V2 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V2) + center;
+
+	V3 = V3 - center;
+	V3 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V3) + center;
+
+	float distIncrement = speedFromDistance * (1 / dist);
+	V1 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+	V2 += (-dir * (baseSpeed  * distIncrement) * explosionTimes[bestIndex]);
+	V3 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+
+	vertexPositions[triangleIndices[id.x * 3]] = V1;
+	vertexPositions[triangleIndices[id.x * 3 + 1]] = V2;
+	vertexPositions[triangleIndices[id.x * 3 + 2]] = V3;
+}
+
+[numthreads(6, 1, 1)]
+void SimulationMedium(uint3 id : SV_DispatchThreadID, uint3 groupIdx : SV_GroupID)
+{
+	if (numExplosions <= 0)
+		return;
+
+	float3 V1 = oldVertexPositions[triangleIndices[id.x * 3]];
+	float3 V2 = oldVertexPositions[triangleIndices[id.x * 3 + 1]];
+	float3 V3 = oldVertexPositions[triangleIndices[id.x * 3 + 2]];
+
+	float maxTime = -1;
+	float bestIndex = 1.#INF;
+
+	for (uint i = 0; i < numExplosions; i++)
+	{
+		float3 centerTemp = (V1 + V2 + V3) / 3;
+		float distTemp = distance(centerTemp, explosionLocations[i]);
+
+		if (distTemp < explosionRadii[i])
+		{
+			if (explosionTimes[i] > maxTime)
+			{
+				maxTime = explosionTimes[i];
+				bestIndex = i;
+			}
+		}
+	}
+
+	//triangle unaffected by explosions
+	if (isinf(bestIndex))
+		return;
+
+	//add to collider removals
+	if (explosionTimes[bestIndex] == 0)
+	{
+		colliderRemovalsIndices.Append(triangleIndices[id.x * 3]);
+		colliderRemovalsObjects.Append(objectIndex);
+	}
+
+	//add to triangle removals
+	if (explosionTimes[bestIndex] > removalTime)
+	{
+		triangleRemovalsIndices.Append(id.x);
+		triangleRemovalsObjects.Append(objectIndex);
+	}
+
+	float3 center = (V1 + V2 + V3) / 3;
+	float3 dist = distance(center, explosionLocations[bestIndex]);
+
+	float3 dir = normalize((explosionLocations[bestIndex] - center).xyz);
+	float3 perpendicular = float3(dir.y, -dir.x, dir.z);
+
+	float distRotIncrement = rotationSpeedFromDist * (1 / dist);
+
+	//rotate vertices
+	V1 = V1 - center;
+	V1 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V1) + center;
+
+	V2 = V2 - center;
+	V2 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V2) + center;
+
+	V3 = V3 - center;
+	V3 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V3) + center;
+
+	float distIncrement = speedFromDistance * (1 / dist);
+	V1 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+	V2 += (-dir * (baseSpeed  * distIncrement) * explosionTimes[bestIndex]);
+	V3 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+
+	vertexPositions[triangleIndices[id.x * 3]] = V1;
+	vertexPositions[triangleIndices[id.x * 3 + 1]] = V2;
+	vertexPositions[triangleIndices[id.x * 3 + 2]] = V3;
+}
+
+[numthreads(3, 1, 1)]
+void SimulationLow(uint3 id : SV_DispatchThreadID, uint3 groupIdx : SV_GroupID)
+{
+	if (numExplosions <= 0)
+		return;
+
+	float3 V1 = oldVertexPositions[triangleIndices[id.x * 3]];
+	float3 V2 = oldVertexPositions[triangleIndices[id.x * 3 + 1]];
+	float3 V3 = oldVertexPositions[triangleIndices[id.x * 3 + 2]];
+
+	float maxTime = -1;
+	float bestIndex = 1.#INF;
+
+	for (uint i = 0; i < numExplosions; i++)
+	{
+		float3 centerTemp = (V1 + V2 + V3) / 3;
+		float distTemp = distance(centerTemp, explosionLocations[i]);
+
+		if (distTemp < explosionRadii[i])
+		{
+			if (explosionTimes[i] > maxTime)
+			{
+				maxTime = explosionTimes[i];
+				bestIndex = i;
+			}
+		}
+	}
+
+	//triangle unaffected by explosions
+	if (isinf(bestIndex))
+		return;
+
+	//add to collider removals
+	if (explosionTimes[bestIndex] == 0)
+	{
+		colliderRemovalsIndices.Append(triangleIndices[id.x * 3]);
+		colliderRemovalsObjects.Append(objectIndex);
+	}
+
+	//add to triangle removals
+	if (explosionTimes[bestIndex] > removalTime)
+	{
+		triangleRemovalsIndices.Append(id.x);
+		triangleRemovalsObjects.Append(objectIndex);
+	}
+
+	float3 center = (V1 + V2 + V3) / 3;
+	float3 dist = distance(center, explosionLocations[bestIndex]);
+
+	float3 dir = normalize((explosionLocations[bestIndex] - center).xyz);
+	float3 perpendicular = float3(dir.y, -dir.x, dir.z);
+
+	float distRotIncrement = rotationSpeedFromDist * (1 / dist);
+
+	//rotate vertices
+	V1 = V1 - center;
+	V1 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V1) + center;
+
+	V2 = V2 - center;
+	V2 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V2) + center;
+
+	V3 = V3 - center;
+	V3 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V3) + center;
+
+	float distIncrement = speedFromDistance * (1 / dist);
+	V1 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+	V2 += (-dir * (baseSpeed  * distIncrement) * explosionTimes[bestIndex]);
+	V3 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+
+	vertexPositions[triangleIndices[id.x * 3]] = V1;
+	vertexPositions[triangleIndices[id.x * 3 + 1]] = V2;
+	vertexPositions[triangleIndices[id.x * 3 + 2]] = V3;
+}
+
+[numthreads(1, 1, 1)]
+void SimulationLowest(uint3 id : SV_DispatchThreadID, uint3 groupIdx : SV_GroupID)
+{
+	if (numExplosions <= 0)
+		return;
+
+	float3 V1 = oldVertexPositions[triangleIndices[id.x * 3]];
+	float3 V2 = oldVertexPositions[triangleIndices[id.x * 3 + 1]];
+	float3 V3 = oldVertexPositions[triangleIndices[id.x * 3 + 2]];
+
+	float maxTime = -1;
+	float bestIndex = 1.#INF;
+
+	for (uint i = 0; i < numExplosions; i++)
+	{
+		float3 centerTemp = (V1 + V2 + V3) / 3;
+		float distTemp = distance(centerTemp, explosionLocations[i]);
+
+		if (distTemp < explosionRadii[i])
+		{
+			if (explosionTimes[i] > maxTime)
+			{
+				maxTime = explosionTimes[i];
+				bestIndex = i;
+			}
+		}
+	}
+
+	//triangle unaffected by explosions
+	if (isinf(bestIndex))
+		return;
+
+	//add to collider removals
+	if (explosionTimes[bestIndex] == 0)
+	{
+		colliderRemovalsIndices.Append(triangleIndices[id.x * 3]);
+		colliderRemovalsObjects.Append(objectIndex);
+	}
+
+	//add to triangle removals
+	if (explosionTimes[bestIndex] > removalTime)
+	{
+		triangleRemovalsIndices.Append(id.x);
+		triangleRemovalsObjects.Append(objectIndex);
+	}
+
+	float3 center = (V1 + V2 + V3) / 3;
+	float3 dist = distance(center, explosionLocations[bestIndex]);
+
+	float3 dir = normalize((explosionLocations[bestIndex] - center).xyz);
+	float3 perpendicular = float3(dir.y, -dir.x, dir.z);
+
+	float distRotIncrement = rotationSpeedFromDist * (1 / dist);
+
+	//rotate vertices
+	V1 = V1 - center;
+	V1 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V1) + center;
+
+	V2 = V2 - center;
+	V2 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V2) + center;
+
+	V3 = V3 - center;
+	V3 = rotatePosition(perpendicular, explosionTimes[bestIndex] * (baseRotationSpeed * distRotIncrement), V3) + center;
+
+	float distIncrement = speedFromDistance * (1 / dist);
+	V1 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+	V2 += (-dir * (baseSpeed  * distIncrement) * explosionTimes[bestIndex]);
+	V3 += (-dir * (baseSpeed * distIncrement) * explosionTimes[bestIndex]);
+
+	vertexPositions[triangleIndices[id.x * 3]] = V1;
+	vertexPositions[triangleIndices[id.x * 3 + 1]] = V2;
+	vertexPositions[triangleIndices[id.x * 3 + 2]] = V3;
+}

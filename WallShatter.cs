@@ -8,7 +8,7 @@ using UnityEditor;
 #endif
 using UnityEngine;
 
-public class wallShatter : MonoBehaviour
+public class WallShatter : MonoBehaviour
 {
     struct Explosion
     {
@@ -53,6 +53,9 @@ public class wallShatter : MonoBehaviour
     [SerializeField]
     private Vector3[] explosionPositions;
 
+    [SerializeField]
+    private ComputeShader mSimulationShader;
+
     //compute buffers
     private ComputeBuffer mVertices;
     private ComputeBuffer mOldVertices;
@@ -69,8 +72,8 @@ public class wallShatter : MonoBehaviour
     private bool mExpectingCallback;
     private bool mHasExploded;
 
-    private Material mMaterial;
     private Bounds mOriginalBounds;
+    private int[] mKernals;
 
     private List<int> mTempIndices;
 
@@ -80,17 +83,24 @@ public class wallShatter : MonoBehaviour
     public void initializeData()
     {
 #if UNITY_EDITOR
-        Mesh newMesh = Mesh.Instantiate(AvoidVertexSharing());
-        AssetDatabase.CreateAsset(newMesh, "Assets/Scenes/scene1/models/walls/" + newMesh.name + gameObject.name + ".asset");
-        AssetDatabase.SaveAssets();
-        GetComponent<MeshFilter>().mesh = newMesh;
-        GetComponent<WallCol>().generatePolygonCollider(GetComponent<MeshFilter>().sharedMesh);
+        //Mesh newMesh = Mesh.Instantiate(avoidVertexSharing());
+        //AssetDatabase.CreateAsset(newMesh, "Assets/Scenes/scene1/models/walls/" + newMesh.name + gameObject.name + ".asset");
+        //AssetDatabase.SaveAssets();
+        //GetComponent<MeshFilter>().mesh = newMesh;
+        //GetComponent<WallCol>().generatePolygonCollider(GetComponent<MeshFilter>().sharedMesh);
+        mSimulationShader = ComputeShader.Instantiate(mSimulationShader);
         EditorUtility.SetDirty(this);
 #endif
     }
 
     public void InitWall(int index)
     {
+        mKernals = new int[4];
+        mKernals[0] = mSimulationShader.FindKernel("SimulationHigh");
+        mKernals[1] = mSimulationShader.FindKernel("SimulationMedium");
+        mKernals[2] = mSimulationShader.FindKernel("SimulationLow");
+        mKernals[3] = mSimulationShader.FindKernel("SimulationLowest");
+
         explosionTimes = new float[mExplosionMax];
         explosionRadii = new float[mExplosionMax];
         explosionPositions = new Vector3[mExplosionMax];
@@ -101,7 +111,6 @@ public class wallShatter : MonoBehaviour
         mTempIndices = new List<int>();
         mCurrentExplosions = 0;
         mExpectingCallback = false;
-        mMaterial = GetComponent<MeshRenderer>().material;
 
         //original data buffers
         Vector3[] pOldVertexInitBuffer = GetComponent<MeshFilter>().mesh.vertices;
@@ -136,29 +145,44 @@ public class wallShatter : MonoBehaviour
         mExplosionRadii.SetData(pExplRadiiInitBuffer);
 
         //set shader data
-        mMaterial.SetBuffer("positions", mVertices);
-        mMaterial.SetInt("running", 1);
+        mSimulationShader.SetFloat("baseSpeed", baseSpeed);
+        mSimulationShader.SetFloat("speedFromDistance", speedFromDistance);
+        mSimulationShader.SetFloat("speedRand", speedRand);
 
-        mMaterial.SetFloat("baseSpeed", baseSpeed);
-        mMaterial.SetFloat("speedFromDistance", speedFromDistance);
-        mMaterial.SetFloat("speedRand", speedRand);
+        mSimulationShader.SetFloat("baseRotationSpeed", baseRotationSpeed);
+        mSimulationShader.SetFloat("rotationSpeedFromDist", rotationSpeedFromDist);
+        mSimulationShader.SetFloat("rotSpeedRand", rotSpeedRand);
 
-        mMaterial.SetFloat("baseRotationSpeed", baseRotationSpeed);
-        mMaterial.SetFloat("rotationSpeedFromDist", rotationSpeedFromDist);
-        mMaterial.SetFloat("rotSpeedRand", rotSpeedRand);
+        mSimulationShader.SetFloat("removalTime", removalTime);
+        mSimulationShader.SetInt("objectIndex", mWallIndex);
 
-        mMaterial.SetFloat("removalTime", removalTime);
-        mMaterial.SetInt("objectIndex", mWallIndex);
+        foreach (int id in mKernals)
+        {
+            mSimulationShader.SetBuffer(id, "vertexPositions", mVertices);
+            mSimulationShader.SetBuffer(id, "triangleIndices", mIndices);
+            mSimulationShader.SetBuffer(id, "oldVertexPositions", mOldVertices);
 
-        mMaterial.SetBuffer("vertexPositions", mVertices);
-        mMaterial.SetBuffer("triangleIndices", mIndices);
-        mMaterial.SetBuffer("oldVertexPositions", mOldVertices);
+            mSimulationShader.SetBuffer(id, "explosionTimes", mExplosionTimes);
+            mSimulationShader.SetBuffer(id, "explosionLocations", mExplosionLocations);
+            mSimulationShader.SetBuffer(id, "explosionRadii", mExplosionRadii);
+        }
 
-        mMaterial.SetBuffer("explosionTimes", mExplosionTimes);
-        mMaterial.SetBuffer("explosionLocations", mExplosionLocations);
-        mMaterial.SetBuffer("explosionRadii", mExplosionRadii);
-
+        GetComponent<MeshRenderer>().material.SetBuffer("vertexPositions", mVertices);
+        GetComponent<MeshRenderer>().material.SetInt("playing", 1);
         mHasExploded = false;
+    }
+
+    public void SetManagerBuffers(ComputeBuffer colIndex, ComputeBuffer triIndex, 
+        ComputeBuffer colObj, ComputeBuffer triObj)
+    {
+        foreach (int id in mKernals)
+        {
+            mSimulationShader.SetBuffer(id, "colliderRemovalsObjects", colObj);
+            mSimulationShader.SetBuffer(id, "triangleRemovalsObjects", triObj);
+
+            mSimulationShader.SetBuffer(id, "colliderRemovalsIndices", colIndex);
+            mSimulationShader.SetBuffer(id, "triangleRemovalsIndices", triIndex);
+        }
     }
 
     // Update is called once per frame
@@ -166,7 +190,7 @@ public class wallShatter : MonoBehaviour
     {
         if (mCurrentExplosions > 0)
         {
-            mMaterial.SetInt("numExplosions", mCurrentExplosions);
+            mSimulationShader.SetInt("numExplosions", mCurrentExplosions);
             mTempIndices.Clear();
 
             for (int i = 0; i < mCurrentExplosions; i++)
@@ -184,7 +208,33 @@ public class wallShatter : MonoBehaviour
                 GetComponent<MeshFilter>().mesh.bounds = new Bounds(Vector3.zero, Vector3.one * float.MaxValue);
             }
 
-            mHasExploded = true;                
+            mHasExploded = true;
+
+            int kernelId = 0;
+            uint actual_xGroups = 0;
+            foreach (int id in mKernals)
+            {
+                uint xGroups = 0;
+                uint yGroups = 0;
+                uint zGroups = 0;
+                mSimulationShader.GetKernelThreadGroupSizes(id, out xGroups, out yGroups, out zGroups);
+                if ((float)GetComponent<MeshFilter>().mesh.triangles.Length / (float)3 % (float)xGroups == 0)
+                {
+                    kernelId = id;
+                    actual_xGroups = xGroups;
+                    break;
+                }
+            }
+
+            mSimulationShader.Dispatch(kernelId, GetComponent<MeshFilter>().mesh.triangles.Length / 3 / (int)actual_xGroups, 1, 1);
+
+            foreach (int index in mTempIndices)
+            {
+                explosionTimes[index] += Time.deltaTime;
+            }
+
+            if (mTempIndices.Count > 0)
+                mExplosionTimes.SetData(explosionTimes);
         }
         else
         {
@@ -230,7 +280,7 @@ public class wallShatter : MonoBehaviour
             {
                 explosionTimes[i] = -1.0f;
                 decrementAmount++;
-                Camera.main.GetComponent<wallManager>().RemoveExplosion();
+                Camera.main.GetComponent<WallManager>().RemoveExplosion();
             }
         }
 
@@ -315,8 +365,13 @@ public class wallShatter : MonoBehaviour
         graphGeneratorScript.sGraphGen.updateGraph(pos, strength);
 
         mExpectingCallback = true;
-        Camera.main.GetComponent<wallManager>().AddExplosion();
-        Camera.main.GetComponent<wallManager>().AddColRemovalExpectation();
+        Camera.main.GetComponent<WallManager>().AddExplosion();
+        Camera.main.GetComponent<WallManager>().AddColRemovalExpectation();
+    }
+
+    public void CustomPostRender()
+    {
+        CheckForRemovals();
     }
 
     /// <summary>
@@ -347,7 +402,7 @@ public class wallShatter : MonoBehaviour
 
             int[] newIndices = new int[sourceIndices.Length];
 
-            // Create a unique vertex for every index in the original Mesh:
+            // create a unique vertex for every index in the original mesh
             for (int i = 0; i < sourceIndices.Length; i++)
             {
                 int newIndex = sourceIndices[i];
@@ -369,24 +424,6 @@ public class wallShatter : MonoBehaviour
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
         return mesh;
-    }
-
-    /// <summary>
-    /// Called by wall manager after camera renders scene
-    /// </summary>
-    public void CustomPostRender()
-    {
-        CheckForRemovals();
-
-        if (mTempIndices.Count > 0)
-        {
-            foreach (int index in mTempIndices)
-            {
-                explosionTimes[index] += Time.deltaTime;
-            }
-
-            mExplosionTimes.SetData(explosionTimes);
-        }
     }
 
     private void OnDestroy()
